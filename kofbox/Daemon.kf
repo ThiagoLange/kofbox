@@ -1,0 +1,281 @@
+// Daemon.kf — Servidor HTTP + rotas da API KofBox (Kof real, 0.6.4)
+//
+// API usada: web.app(), app.get/post, app.listen, headerSet (kof.web, JVM).
+// Sem middleware: app.use com `return null` quebra todas as rotas no Kof
+// atual — log e auth são feitos dentro de cada handler.
+// Contexto dentro dos handlers: param(), query(), header(), body().
+// JSON é detectado pelo prefixo `{`/`[`; o `/` fixa text/html via headerSet
+// (sem isso o navegador exibiria o dashboard como texto puro).
+//
+// Histórico: arquivo JSONL `history.jsonl` no diretório de trabalho
+// (uma linha = um ExecutionResult em JSON). Simples, persistente e sem
+// depender de estado estático complexo. GET /api/history devolve o
+// conteúdo bruto (JSONL); a UI faz split por linha.
+
+import java.lang.Exception
+
+String historyPath() {
+    return config.str("kofbox.history-file", "history.jsonl")
+}
+
+// API key opcional: KOF_KOFBOX_API_KEY (ou kofbox.api-key no kof.config).
+// Vazia = auth desabilitada (modo demo local). Checagem feita dentro de
+// cada handler (middleware app.use com `return null` quebra as rotas).
+Bool authorized() {
+    var want = config.str("kofbox.api-key", "")
+    if (want == "") {
+        return true
+    }
+    var got = header("x-api-key")
+    if (got == null) {
+        return false
+    }
+    if (got == want) {
+        return true
+    }
+    return false
+}
+
+String unauthorizedJson() {
+    return "{\"id\":\"unknown\",\"language\":\"unknown\",\"exitCode\":-1,\"stdout\":\"\",\"stderr\":\"unauthorized: x-api-key invalida ou ausente\",\"status\":\"FAILED\"}"
+}
+
+String unauthorizedHistoryJson() {
+    return "{\"history\":[],\"total\":0,\"error\":\"unauthorized: x-api-key invalida ou ausente\"}"
+}
+
+// Últimas N linhas não-vazias do JSONL como array JSON de verdade.
+String historyJson(String jsonl, Int limit) {
+    if (jsonl == "") {
+        return "{\"history\":[],\"total\":0}"
+    }
+    var lines = jsonl.split("\n")
+    var total = 0
+    for (var i = 0; i < lines.length; i++) {
+        if (lines[i] != "") {
+            total = total + 1
+        }
+    }
+    var start = total - limit
+    if (start < 0) {
+        start = 0
+    }
+    var out = "{\"history\":["
+    var seen = 0
+    var added = 0
+    for (var j = 0; j < lines.length; j++) {
+        if (lines[j] != "") {
+            if (seen >= start) {
+                if (added > 0) {
+                    out = out + ","
+                }
+                out = out + lines[j]
+                added = added + 1
+            }
+            seen = seen + 1
+        }
+    }
+    var totalStr = "" + total
+    out = out + "],\"total\":" + totalStr + "}"
+    return out
+}
+
+Int limitParam() {
+    var raw = query("limit")
+    if (raw == null) {
+        return 50
+    }
+    if (raw == "") {
+        return 50
+    }
+    try {
+        var n = raw.toInt()
+        if (n <= 0) {
+            return 50
+        }
+        if (n > 500) {
+            return 500
+        }
+        return n
+    } catch (Exception e) {
+        return 50
+    }
+}
+
+// Cache dos arquivos estáticos em memória (evita ler disco a cada request)
+class IndexCache {
+    static String html = ""
+    static String css = ""
+    static String js = ""
+}
+
+// Lê p1 e, se não existir, p2 (cobre `kof run Main.kf` e `kof run kofbox/Main.kf`).
+String readPublic(String p1, String p2) {
+    var a = Path(p1)
+    if (a.exists()) {
+        var t = a.readText()
+        if (t != null) {
+            return t
+        }
+    }
+    var b = Path(p2)
+    if (b.exists()) {
+        var u = b.readText()
+        if (u != null) {
+            return u
+        }
+    }
+    return ""
+}
+
+void appendHistory(String line) {
+    var p = Path(historyPath())
+    if (p.exists()) {
+        p.appendText(line + "\n")
+    } else {
+        p.writeText(line + "\n")
+    }
+}
+
+String loadHistory() {
+    var p = Path(historyPath())
+    if (p.exists()) {
+        var t = p.readText()
+        if (t != null) {
+            return t
+        }
+    }
+    return ""
+}
+
+String loadIndex() {
+    if (IndexCache.html != "") {
+        return IndexCache.html
+    }
+    var c = readPublic("public/index.html", "kofbox/public/index.html")
+    if (c == "") {
+        return "<html><body><h1>KofBox online</h1><p>UI nao encontrada. Use /api/health e /api/execute.</p></body></html>"
+    }
+    IndexCache.html = c
+    return c
+}
+
+String loadCss() {
+    if (IndexCache.css != "") {
+        return IndexCache.css
+    }
+    var c = readPublic("public/styles.css", "kofbox/public/styles.css")
+    if (c == "") {
+        return "/* kofbox: styles.css nao encontrado */"
+    }
+    IndexCache.css = c
+    return c
+}
+
+String loadJs() {
+    if (IndexCache.js != "") {
+        return IndexCache.js
+    }
+    var c = readPublic("public/app.js", "kofbox/public/app.js")
+    if (c == "") {
+        return "/* kofbox: app.js nao encontrado */"
+    }
+    IndexCache.js = c
+    return c
+}
+
+String healthJson(String portStr) {
+    var py = boolStr(runnerAvailable("python3"))
+    var nd = boolStr(runnerAvailable("node"))
+    var rb = boolStr(runnerAvailable("ruby"))
+    var sh = boolStr(runnerAvailable("bash"))
+    var lu = boolStr(runnerAvailable("lua"))
+    var pl = boolStr(runnerAvailable("perl"))
+    var rr = boolStr(runnerAvailable("Rscript"))
+    var ak = boolStr(runnerAvailable("awk"))
+    var dt = boolStr(runnerAvailable("dart"))
+    var jl = boolStr(runnerAvailable("julia"))
+    var go = boolStr(runnerAvailable("go"))
+    var sq = boolStr(runnerAvailable("sqlite3"))
+    var dd = boolStr(runnerAvailable("duckdb"))
+    var rs = boolStr(runnerAvailable("rustc"))
+    var jv = boolStr(runnerAvailable("java"))
+    var pg = boolStr(dbReachable("postgres"))
+    var my = boolStr(dbReachable("mysql"))
+    var kk = boolStr(runnerAvailable("kof"))
+    var timeoutStr = "" + kofboxTimeout()
+    var key = config.str("kofbox.api-key", "")
+    var auth = "false"
+    if (key != "") {
+        auth = "true"
+    }
+    return "{\"status\":\"UP\",\"service\":\"kofbox\",\"port\":" + portStr + ",\"timeout_seconds\":" + timeoutStr + ",\"auth_required\":" + auth + ",\"runners\":{\"python\":" + py + ",\"node\":" + nd + ",\"ruby\":" + rb + ",\"bash\":" + sh + ",\"lua\":" + lu + ",\"perl\":" + pl + ",\"r\":" + rr + ",\"awk\":" + ak + ",\"dart\":" + dt + ",\"julia\":" + jl + ",\"go\":" + go + ",\"sqlite\":" + sq + ",\"duckdb\":" + dd + ",\"rust\":" + rs + ",\"java\":" + jv + ",\"postgres\":" + pg + ",\"mysql\":" + my + ",\"kof\":" + kk + ",\"portukof\":" + kk + "}}"
+}
+
+void startDaemon(Int port) {
+    println("KofBox rodando em http://localhost:" + port)
+    log.info("KofBox daemon iniciando na porta " + port)
+
+    // portStr pré-computado: concatenar Int capturado dentro de lambda
+    // falha em runtime (unboxing do BoxN). String captura sem problema.
+    var portStr = "" + port
+
+    var app = web.app()
+
+    app.get("/") {
+        log.info("REQ GET /")
+        headerSet("Content-Type", "text/html; charset=utf-8")
+        return loadIndex()
+    }
+
+    app.get("/styles.css") {
+        log.info("REQ GET /styles.css")
+        headerSet("Content-Type", "text/css; charset=utf-8")
+        return loadCss()
+    }
+
+    app.get("/app.js") {
+        log.info("REQ GET /app.js")
+        headerSet("Content-Type", "application/javascript; charset=utf-8")
+        return loadJs()
+    }
+
+    app.get("/api/health") {
+        log.info("REQ GET /api/health")
+        return healthJson(portStr)
+    }
+
+    app.post("/api/execute") {
+        log.info("REQ POST /api/execute")
+        if (authorized() == false) {
+            return unauthorizedJson()
+        }
+        try {
+            var req = json.decode<ExecutionRequest>(body())
+            var id = req.id()
+            if (id == "") {
+                id = "box-" + time.now()
+            }
+            var result = runCode(id, req.language(), req.code())
+            appendHistory(json.encode(result))
+            return json.encode(result)
+        } catch (Exception e) {
+            var msg = e.getMessage()
+            if (msg == null) {
+                msg = "erro desconhecido"
+            }
+            return "{\"id\":\"unknown\",\"language\":\"unknown\",\"exitCode\":-1,\"stdout\":\"\",\"stderr\":" + json.encode(msg) + ",\"status\":\"FAILED\"}"
+        }
+    }
+
+    app.get("/api/history") {
+        log.info("REQ GET /api/history")
+        if (authorized() == false) {
+            return unauthorizedHistoryJson()
+        }
+        var h = loadHistory()
+        return historyJson(h, limitParam())
+    }
+
+    app.listen(port)
+}

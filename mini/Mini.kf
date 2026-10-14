@@ -1,0 +1,57 @@
+// Mini.kf — KofBox Mini: cliente desktop (kof.ui) do KofBox
+//
+// Um app de janela real, 100% Kof, que usa a API do KofBox:
+// digite Python de uma linha, aperte Executar e veja o stdout.
+// Requer o daemon rodando: ./kofbox/run.sh (http://localhost:8080).
+//
+// Execução (abre o webview nativo; fechar a janela encerra):
+//   kof run Mini.kf --target=js
+//
+// Limites honestos do kof.ui hoje: Input é de linha única (sem editor
+// multilinha/dropdown) e a ação do botão roda na thread da UI — por isso
+// o Mini é um companheiro do dashboard web, não um substituto.
+
+record ExecReq(String id, String language, String code)
+record ExecRes(String id, String language, Int exitCode, String stdout, String stderr, String status)
+
+String runPython(String code) {
+    var req = ExecReq("mini", "python", code)
+    var raw = http.post("http://localhost:8080/api/execute", json.encode(req))
+    var res = json.decode<ExecRes>(raw)
+    if (res.exitCode() == 0) {
+        return res.stdout()
+    }
+    return "ERRO exit " + res.exitCode() + ":\n" + res.stderr()
+}
+
+main() {
+    var w = Window("KofBox Mini")
+    w.size(560, 420)
+    w.theme = Theme.dark()
+
+    var title = Label("KofBox Mini — Python de uma linha")
+    title.fontSize = 20
+    title.bold = true
+
+    var sub = Label("Daemon: http://localhost:8080 (rode ./kofbox/run.sh)")
+    sub.color = Palette.gray
+
+    var input = Input("print(6*7)")
+    var out = Label("Digite o código e aperte Executar…")
+
+    var row = Row(listOf(
+        Button("Executar", () -> {
+            out.text = runPython(input.text())
+        }),
+        Button("Limpar", () -> {
+            out.text = "Digite o código e aperte Executar…"
+        })
+    ))
+
+    w.bind(title)
+    w.bind(sub)
+    w.bind(input)
+    w.bind(row)
+    w.bind(out)
+    w.show()
+}

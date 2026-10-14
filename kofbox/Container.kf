@@ -1,0 +1,508 @@
+// Container.kf — Motor multi-linguagem do KofBox (Kof real, 0.6.4)
+//
+// Execução via `kof.process` NATIVO: process.run(programa, args...) devolve
+// Result com .exitCode/.stdout/.stderr (sem Java interop, sem Scanner).
+// Timeout via GNU `timeout` como primeiro argv (process.run não tem timeout
+// próprio); temp files com UUID (sem race).
+
+import java.util.UUID
+
+// Contratos da API (serializáveis via json.encode/decode)
+record ExecutionRequest(String id, String language, String code)
+record ExecutionResult(String id, String language, Int exitCode, String stdout, String stderr, String status)
+
+// Sem teto de tamanho: qualquer código roda (proteja com proxy reverso,
+// timeout e rate limit em exposição — ver docs/SEGURANCA.md).
+
+// Definição única por linguagem (DRY: runner + extensão num só lugar)
+record LangDef(String runner, String ext)
+
+LangDef langDef(String language) {
+    if (language == "python") {
+        return LangDef("python3", "py")
+    }
+    if (language == "javascript") {
+        return LangDef("node", "js")
+    }
+    if (language == "ruby") {
+        return LangDef("ruby", "rb")
+    }
+    if (language == "lua") {
+        return LangDef("lua", "lua")
+    }
+    if (language == "perl") {
+        return LangDef("perl", "pl")
+    }
+    if (language == "r") {
+        return LangDef("Rscript", "R")
+    }
+    if (language == "awk") {
+        return LangDef("awk", "awk")
+    }
+    if (language == "dart") {
+        return LangDef("dart", "dart")
+    }
+    if (language == "julia") {
+        return LangDef("julia", "jl")
+    }
+    if (language == "go") {
+        return LangDef("go", "go")
+    }
+    if (language == "sqlite") {
+        return LangDef("sqlite3", "sql")
+    }
+    if (language == "duckdb") {
+        return LangDef("duckdb", "sql")
+    }
+    if (language == "rust") {
+        return LangDef("rustc", "rs")
+    }
+    if (language == "java") {
+        return LangDef("java", "java")
+    }
+    if (language == "postgres") {
+        return LangDef("psql", "sql")
+    }
+    if (language == "mysql") {
+        return LangDef("mysql", "sql")
+    }
+    if (language == "kof") {
+        return LangDef("kof", "kf")
+    }
+    if (language == "portukof") {
+        return LangDef("kof", "ptkf")
+    }
+    return LangDef("bash", "sh")
+}
+
+String normalizeLanguage(String language) {
+    if (language == "python") {
+        return language
+    }
+    if (language == "javascript") {
+        return language
+    }
+    if (language == "ruby") {
+        return language
+    }
+    if (language == "bash") {
+        return language
+    }
+    if (language == "lua") {
+        return language
+    }
+    if (language == "perl") {
+        return language
+    }
+    if (language == "r") {
+        return language
+    }
+    if (language == "awk") {
+        return language
+    }
+    if (language == "dart") {
+        return language
+    }
+    if (language == "julia") {
+        return language
+    }
+    if (language == "go") {
+        return language
+    }
+    if (language == "sqlite") {
+        return language
+    }
+    if (language == "duckdb") {
+        return language
+    }
+    if (language == "rust") {
+        return language
+    }
+    if (language == "java") {
+        return language
+    }
+    if (language == "postgres") {
+        return language
+    }
+    if (language == "mysql") {
+        return language
+    }
+    if (language == "kof") {
+        return language
+    }
+    if (language == "portukof") {
+        return language
+    }
+    return "bash"
+}
+
+// Timeout configurável: KOF_KOFBOX_TIMEOUT_SECONDS (padrão 15)
+Int kofboxTimeout() {
+    var t = config.int("kofbox.timeout-seconds", 15)
+    if (t <= 0) {
+        return 15
+    }
+    return t
+}
+
+String boolStr(Bool b) {
+    if (b) {
+        return "true"
+    }
+    return "false"
+}
+
+// Checa se o banco responde (para o /api/health; sem efeito colateral).
+Bool dbReachable(String language) {
+    if (language == "postgres") {
+        var r = process.run("docker", "exec", "kofbox-postgres", "pg_isready", "-U", "postgres")
+        return r.exitCode == 0
+    }
+    if (language == "mysql") {
+        var r = process.run("docker", "exec", "kofbox-mysql", "mysqladmin", "--user=root", "--password=kofbox", "ping")
+        return r.exitCode == 0
+    }
+    return false
+}
+
+// Checa se o runner existe no PATH (para o /api/health)
+Bool runnerAvailable(String runner) {
+    var r = process.run("which", runner)
+    if (r.exitCode == 0) {
+        return true
+    }
+    return false
+}
+
+String extensionFor(String language) {
+    var d = langDef(language)
+    return d.ext()
+}
+
+String runnerFor(String language) {
+    var d = langDef(language)
+    return d.runner()
+}
+
+Bool languageSupported(String language) {
+    if (language == "python") {
+        return true
+    }
+    if (language == "javascript") {
+        return true
+    }
+    if (language == "ruby") {
+        return true
+    }
+    if (language == "bash") {
+        return true
+    }
+    if (language == "lua") {
+        return true
+    }
+    if (language == "perl") {
+        return true
+    }
+    if (language == "r") {
+        return true
+    }
+    if (language == "awk") {
+        return true
+    }
+    if (language == "dart") {
+        return true
+    }
+    if (language == "julia") {
+        return true
+    }
+    if (language == "go") {
+        return true
+    }
+    if (language == "sqlite") {
+        return true
+    }
+    if (language == "duckdb") {
+        return true
+    }
+    if (language == "rust") {
+        return true
+    }
+    if (language == "java") {
+        return true
+    }
+    if (language == "postgres") {
+        return true
+    }
+    if (language == "mysql") {
+        return true
+    }
+    if (language == "kof") {
+        return true
+    }
+    if (language == "portukof") {
+        return true
+    }
+    return false
+}
+
+// Garante o container do banco (cria na primeira vez, sobe se parado).
+// Sem porta publicada: só `docker exec` alcança (sandbox local).
+void ensureDb(String name, String image, String e1, String e2) {
+    var chk = process.run("docker", "inspect", name)
+    if (chk.exitCode != 0) {
+        process.run("docker", "run", "-d", "--name", name, "-e", e1, "-e", e2, image)
+    } else {
+        process.run("docker", "start", name)
+    }
+}
+
+ExecutionResult runCode(String id, String language, String code) {
+    var lang = normalizeLanguage(language)
+
+    if (code == "") {
+        return ExecutionResult(id, lang, -1, "", "codigo vazio: nada para executar", "FAILED")
+    }
+
+    var ext = extensionFor(lang)
+    var runner = runnerFor(lang)
+    var timeoutSecs = kofboxTimeout()
+    var timeoutStr = "" + timeoutSecs
+
+    // UUID: único mesmo sob requests concorrentes (contador estático teria race)
+    var u = UUID.randomUUID()
+    var filePath = "/tmp/kofbox_" + u.toString() + "." + ext
+
+    var path = Path(filePath)
+    var ok = path.writeText(code)
+    if (ok == false) {
+        log.info("KofBox FALHA ao gravar [" + lang + "] id=" + id)
+        return ExecutionResult(id, lang, -1, "", "falha ao gravar arquivo temporario", "FAILED")
+    }
+    log.info("KofBox executando [" + lang + "] id=" + id + " -> " + filePath)
+
+    if (lang == "go") {
+        var r = process.run("timeout", timeoutStr + "s", "go", "run", filePath)
+        return finishRun(id, lang, filePath, r.exitCode, r.stdout, r.stderr)
+    }
+    if (lang == "kof" || lang == "portukof") {
+        var r = process.run("timeout", timeoutStr + "s", "kof", "run", filePath)
+        return finishRun(id, lang, filePath, r.exitCode, r.stdout, r.stderr)
+    }
+    if (lang == "awk") {
+        var r = process.run("timeout", timeoutStr + "s", "awk", "-f", filePath, "/dev/null")
+        return finishRun(id, lang, filePath, r.exitCode, r.stdout, r.stderr)
+    }
+    if (lang == "sqlite") {
+        var r = process.run("timeout", timeoutStr + "s", "sqlite3", ":memory:", code)
+        return finishRun(id, lang, filePath, r.exitCode, r.stdout, r.stderr)
+    }
+    if (lang == "duckdb") {
+        var r = process.run("timeout", timeoutStr + "s", "duckdb", "-c", code)
+        return finishRun(id, lang, filePath, r.exitCode, r.stdout, r.stderr)
+    }
+    if (lang == "postgres") {
+        ensureDb("kofbox-postgres", "postgres:16", "POSTGRES_PASSWORD=kofbox", "POSTGRES_DB=kofbox")
+        var r = process.run("timeout", timeoutStr + "s", "docker", "exec", "kofbox-postgres", "psql", "-U", "postgres", "-d", "kofbox", "-XqtA", "-c", code)
+        return finishRun(id, lang, filePath, r.exitCode, r.stdout, r.stderr)
+    }
+    if (lang == "mysql") {
+        ensureDb("kofbox-mysql", "mysql:8.4", "MYSQL_ROOT_PASSWORD=kofbox", "MYSQL_DATABASE=kofbox")
+        var r = process.run("timeout", timeoutStr + "s", "docker", "exec", "kofbox-mysql", "mysql", "-uroot", "-pkofbox", "kofbox", "-NBe", code)
+        return finishRun(id, lang, filePath, r.exitCode, r.stdout, r.stderr)
+    }
+    if (lang == "java") {
+        var r = process.run("timeout", timeoutStr + "s", "java", filePath)
+        return finishRun(id, lang, filePath, r.exitCode, r.stdout, r.stderr)
+    }
+    if (lang == "rust") {
+        var binPath = filePath + ".bin"
+        var c = process.run("timeout", timeoutStr + "s", "rustc", "--edition", "2021", filePath, "-o", binPath)
+        var co = c.stdout
+        if (co == null) {
+            co = ""
+        }
+        var ce = c.stderr
+        if (ce == null) {
+            ce = ""
+        }
+        if (c.exitCode != 0) {
+            Path(filePath).delete()
+            return ExecutionResult(id, lang, c.exitCode, co, ce, "FAILED")
+        }
+        var r = process.run("timeout", timeoutStr + "s", binPath)
+        var o = r.stdout
+        if (o == null) {
+            o = ""
+        }
+        var e = r.stderr
+        if (e == null) {
+            e = ""
+        }
+        Path(filePath).delete()
+        if (Path(binPath).exists()) {
+            Path(binPath).delete()
+        }
+        var status = "FAILED"
+        if (r.exitCode == 0) {
+            status = "SUCCESS"
+        }
+        return ExecutionResult(id, lang, r.exitCode, o, e, status)
+    }
+    var r = process.run("timeout", timeoutStr + "s", runner, filePath)
+    return finishRun(id, lang, filePath, r.exitCode, r.stdout, r.stderr)
+}
+
+ExecutionResult finishRun(String id, String lang, String filePath, Int exitCode, String stdout, String stderr) {
+    var o = stdout
+    if (o == null) {
+        o = ""
+    }
+    var e = stderr
+    if (e == null) {
+        e = ""
+    }
+    Path(filePath).delete()
+
+    var status = "FAILED"
+    if (exitCode == 0) {
+        status = "SUCCESS"
+    }
+    return ExecutionResult(id, lang, exitCode, o, e, status)
+}
+
+// ---- Testes (`kof test kofbox/Container.kf`; `kof run` ignora estes blocos) ----
+
+test "langDef python" {
+    var d = langDef("python")
+    assert(d.runner() == "python3")
+    assert(d.ext() == "py")
+}
+
+test "langDef javascript" {
+    var d = langDef("javascript")
+    assert(d.runner() == "node")
+    assert(d.ext() == "js")
+}
+
+test "langDef ruby" {
+    var d = langDef("ruby")
+    assert(d.runner() == "ruby")
+    assert(d.ext() == "rb")
+}
+
+test "linguagem desconhecida cai para bash" {
+    assert(normalizeLanguage("cobol") == "bash")
+    var d = langDef("cobol")
+    assert(d.runner() == "bash")
+    assert(d.ext() == "sh")
+}
+
+test "limites e defaults" {
+    assert(kofboxTimeout() >= 1)
+    assert(boolStr(true) == "true")
+    assert(boolStr(false) == "false")
+}
+
+test "runCode rejeita codigo vazio sem executar" {
+    var r = runCode("t-empty", "python", "")
+    assert(r.exitCode() == -1)
+    assert(r.status() == "FAILED")
+}
+
+test "runCode aceita codigo grande (sem teto)" {
+    var big = "x = 1"
+    for (var i = 0; i < 2000; i++) {
+        big = big + "\nx = 1"
+    }
+    var r = runCode("t-big", "python", big)
+    assert(r.exitCode() == 0)
+    assert(r.status() == "SUCCESS")
+}
+
+test "runCode python soma" {
+    var r = runCode("t-py", "python", "print(40+2)")
+    assert(r.exitCode() == 0)
+    assert(r.status() == "SUCCESS")
+    assert(r.stdout() == "42\n")
+}
+
+test "langDef novas linguagens" {
+    assert(langDef("lua").runner() == "lua")
+    assert(langDef("go").ext() == "go")
+    assert(langDef("sqlite").runner() == "sqlite3")
+    assert(langDef("duckdb").ext() == "sql")
+    assert(normalizeLanguage("julia") == "julia")
+    assert(normalizeLanguage("postgres") == "postgres")
+    assert(normalizeLanguage("mysql") == "mysql")
+    assert(languageSupported("sqlite"))
+    assert(languageSupported("duckdb"))
+}
+
+test "runCode lua/perl/r" {
+    var a = runCode("t-lua", "lua", "print(40+2)")
+    assert(a.exitCode() == 0)
+    assert(a.stdout() == "42\n")
+    var b = runCode("t-pl", "perl", "print 40+2, \"\\n\";")
+    assert(b.exitCode() == 0)
+    assert(b.stdout() == "42\n")
+    var c = runCode("t-r", "r", "cat(40+2, \"\\n\")")
+    assert(c.exitCode() == 0)
+    assert(c.stdout().contains("42"))
+}
+
+test "runCode awk/dart/julia" {
+    var a = runCode("t-awk", "awk", "BEGIN { print 40+2 }")
+    assert(a.exitCode() == 0)
+    assert(a.stdout() == "42\n")
+    var b = runCode("t-dart", "dart", "void main() { print(40+2); }")
+    assert(b.exitCode() == 0)
+    assert(b.stdout() == "42\n")
+    var c = runCode("t-jl", "julia", "println(40+2)")
+    assert(c.exitCode() == 0)
+    assert(c.stdout() == "42\n")
+}
+
+test "runCode go" {
+    var r = runCode("t-go", "go", "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(40 + 2) }\n")
+    assert(r.exitCode() == 0)
+    assert(r.stdout() == "42\n")
+}
+
+test "runCode sqlite/duckdb" {
+    var s = runCode("t-sqlite", "sqlite", "select 40+2;")
+    assert(s.exitCode() == 0)
+    assert(s.stdout() == "42\n")
+    var d = runCode("t-duck", "duckdb", "select 40+2;")
+    assert(d.exitCode() == 0)
+    assert(d.stdout().contains("42"))
+}
+
+test "runCode postgres/mysql via docker" {
+    var p = runCode("t-pg", "postgres", "select 40+2;")
+    assert(p.exitCode() == 0)
+    assert(p.stdout() == "42\n")
+    var m = runCode("t-my", "mysql", "select 40+2;")
+    assert(m.exitCode() == 0)
+    assert(m.stdout() == "42\n")
+}
+
+test "runCode rust" {
+    var r = runCode("t-rs", "rust", "fn main() {\n    println!(\"{}\", 40 + 2);\n}\n")
+    assert(r.exitCode() == 0)
+    assert(r.stdout() == "42\n")
+}
+
+test "runCode java" {
+    var r = runCode("t-java", "java", "class Hello {\n    public static void main(String[] args) {\n        System.out.println(40 + 2);\n    }\n}\n")
+    assert(r.exitCode() == 0)
+    assert(r.stdout() == "42\n")
+}
+
+test "runCode kof e portukof (self-hosted)" {
+    var a = runCode("t-kf", "kof", "main() {\n    println(40 + 2)\n}\n")
+    assert(a.exitCode() == 0)
+    assert(a.stdout() == "42\n")
+    var b = runCode("t-ptkf", "portukof", "principal() {\n    escrevaln(40 + 2)\n}\n")
+    assert(b.exitCode() == 0)
+    assert(b.stdout() == "42\n")
+}

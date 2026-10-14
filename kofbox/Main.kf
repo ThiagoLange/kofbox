@@ -1,0 +1,17 @@
+// Main.kf — Ponto de entrada do KofBox
+//
+// Uso:
+//   kof run Main.kf            (a partir de kofbox/)
+//   kof run kofbox/Main.kf     (a partir da raiz do projeto)
+//   kof serve Main.kf --port 8080
+//
+// Porta: config.int("server.port", 8080)
+//   - KOF_SERVER_PORT=9090 kof run Main.kf
+//   - KOF_CONFIG=/etc/kofbox.conf kof run Main.kf
+//   - arquivo kof.config no diretório de trabalho
+
+main() {
+    var port = config.int("server.port", 8080)
+    println("KofBox iniciando... porta " + port)
+    startDaemon(port)
+}

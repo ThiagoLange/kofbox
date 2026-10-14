@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="KofBox — playground multi-linguagem com execução isolada e dashboard web.">
+    <title>KofBox — Playground multi-linguagem</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="bg-grid" aria-hidden="true"></div>
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-logo" aria-hidden="true">📦</span>
+            <div>
+                <h1>KofBox</h1>
+                <p>playground multi-linguagem · execução isolada</p>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <span id="healthBadge" class="badge badge-muted">health: …</span>
+            <span id="runnersBadge" class="badge badge-muted">runners: …</span>
+            <input id="apiKeyInput" type="password" placeholder="x-api-key (opcional)" autocomplete="off" spellcheck="false">
+        </div>
+    </header>
+
+    <main class="layout">
+        <section class="card editor-card">
+            <div class="tabs" role="tablist" aria-label="Linguagem">
+                <button class="tab active" data-lang="python" role="tab">Python 3</button>
+                <button class="tab" data-lang="javascript" role="tab">JavaScript</button>
+                <button class="tab" data-lang="ruby" role="tab">Ruby</button>
+                <button class="tab" data-lang="bash" role="tab">Bash</button>
+                <button class="tab" data-lang="lua" role="tab">Lua</button>
+                <button class="tab" data-lang="perl" role="tab">Perl</button>
+                <button class="tab" data-lang="r" role="tab">R</button>
+                <button class="tab" data-lang="awk" role="tab">Awk</button>
+                <button class="tab" data-lang="dart" role="tab">Dart</button>
+                <button class="tab" data-lang="julia" role="tab">Julia</button>
+                <button class="tab" data-lang="go" role="tab">Go</button>
+                <button class="tab" data-lang="sqlite" role="tab">SQLite</button>
+                <button class="tab" data-lang="duckdb" role="tab">DuckDB</button>
+                <button class="tab" data-lang="rust" role="tab">Rust</button>
+                <button class="tab" data-lang="java" role="tab">Java</button>
+                <button class="tab" data-lang="postgres" role="tab">Postgres</button>
+                <button class="tab" data-lang="mysql" role="tab">MySQL</button>
+                <button class="tab" data-lang="kof" role="tab">Kof</button>
+                <button class="tab" data-lang="portukof" role="tab">PortuKof</button>
+            </div>
+            <div class="editor-wrap">
+                <div id="gutter" class="gutter" aria-hidden="true">1</div>
+                <textarea id="codeArea" class="editor" rows="14" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="Seu código aqui…"></textarea>
+            </div>
+            <div class="actions">
+                <button id="runBtn" class="btn btn-primary">▶ Executar <kbd>Ctrl+Enter</kbd></button>
+                <button id="exampleBtn" class="btn btn-ghost">Restaurar exemplo</button>
+                <span class="hint">timeout de 15s por execução · histórico em <code>history.jsonl</code></span>
+            </div>
+        </section>
+
+        <div class="side">
+            <section class="card console-card">
+                <div class="card-head">
+                    <h2>Console</h2>
+                    <span id="statusBadge" class="badge badge-muted">idle</span>
+                </div>
+                <div class="meta">
+                    <span>id <code id="lastId">—</code></span>
+                    <span>exit <code id="lastExit">—</code></span>
+                    <span>tempo <code id="lastTime">—</code></span>
+                    <button id="copyBtn" class="btn btn-ghost btn-sm">Copiar saída</button>
+                </div>
+                <pre id="outputBox" class="console">Aguardando execução…</pre>
+            </section>
+
+            <section class="card history-card">
+                <div class="card-head">
+                    <h2>Histórico</h2>
+                    <button id="historyBtn" class="btn btn-ghost btn-sm">Atualizar</button>
+                </div>
+                <ul id="historyBox" class="history">
+                    <li class="history-empty">Nenhum dado carregado.</li>
+                </ul>
+            </section>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <span>Powered by <strong>Kof Lang</strong> · <code>kof.web</code> + <code>kof.io</code> + <code>kof.json</code></span>
+        <span><a href="/api/health">/api/health</a> · <a href="/api/history?limit=20">/api/history</a></span>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>

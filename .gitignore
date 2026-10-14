@@ -1,0 +1,5 @@
+# gerados em runtime (nao commitar)
+kofbox/history.jsonl
+*.class
+target/
+.kof/
