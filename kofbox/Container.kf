@@ -245,6 +245,13 @@ Bool languageSupported(String language) {
     return false
 }
 
+// Sobe os bancos no boot (cria se não existem, liga se parados).
+// Sem docker por perto: falha silenciosa, o ensure por execução cobre.
+void warmupDbs() {
+    ensureDb("kofbox-postgres", "postgres:16", "POSTGRES_PASSWORD=kofbox", "POSTGRES_DB=kofbox")
+    ensureDb("kofbox-mysql", "mysql:8.4", "MYSQL_ROOT_PASSWORD=kofbox", "MYSQL_DATABASE=kofbox")
+}
+
 // Garante o container do banco (cria na primeira vez, sobe se parado).
 // Sem porta publicada: só `docker exec` alcança (sandbox local).
 void ensureDb(String name, String image, String e1, String e2) {

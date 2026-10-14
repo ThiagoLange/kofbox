@@ -13,5 +13,6 @@
 main() {
     var port = config.int("server.port", 8080)
     println("KofBox iniciando... porta " + port)
+    warmupDbs()
     startDaemon(port)
 }
